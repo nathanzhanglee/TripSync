@@ -1,0 +1,26 @@
+{
+  "name": "tripsync",
+  "version": "1.0.0",
+  "description": "We process data in Google Drive & Colab at https://drive.google.com/drive/folders/1QuevTAN-a_F7zCLVu1J1-hd3A4QYkL9h?usp=sharing",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kleokhov/TripSync.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Kleokhov/TripSync/issues"
+  },
+  "homepage": "https://github.com/Kleokhov/TripSync#readme",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  }
+}
