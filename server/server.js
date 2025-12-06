@@ -18,6 +18,9 @@ app.post('/destinations/availability/cities', routes.destinations_availability_c
 // Route 2: availability by countries
 app.post('/destinations/availability/countries', routes.destinations_availability_countries);
 
+// Route 4: planning itineraries
+app.post('/planning/itineraries', routes.post_planning_itineraries);
+
 // Route 6: get countries
 app.get('/countries', routes.get_countries);
 
