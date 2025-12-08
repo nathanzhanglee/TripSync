@@ -31,7 +31,7 @@ const destinations_availability_cities = async function (req, res) {
     ),
     origin_airports AS (
       -- Airports in each origin city
-      SELECT DISTINCT
+      SELECT
         o.origin_city_id,
         a.airportid AS origin_airport_id
       FROM origins o
