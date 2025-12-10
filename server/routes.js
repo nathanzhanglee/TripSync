@@ -587,6 +587,7 @@ const destinations_features = async function (req, res) {
     const weights = normalizeWeights(rawWeights);
     const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? rawLimit : 20;
 
+    // Build WHERE clause for cities
     const params = [];
     const where = [];
     let idx = 1;
@@ -615,16 +616,35 @@ const destinations_features = async function (req, res) {
       idx++;
     }
 
-    let preferredCategoriesArray = null;
+    // Track index for preferred categories
+    let preferredCategoriesIdx = null;
     if (preferredCategories && preferredCategories.length) {
-      preferredCategoriesArray = preferredCategories;
-      params.push(preferredCategoriesArray);
+      preferredCategoriesIdx = idx;
+      params.push(preferredCategories);
+      idx++;
     }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    // city-level aggregates
+    // OPTIMIZED: Use CTEs to pre-aggregate hotel and POI statistics
+    // This avoids the cartesian product effect from multiple LEFT JOINs
     const query = `
+      WITH hotel_stats AS (
+        SELECT
+          cityid,
+          AVG(rating) AS avg_rating,
+          COUNT(hotelid) AS hotel_count
+        FROM hotel
+        GROUP BY cityid
+      ),
+      poi_stats AS (
+        SELECT
+          cityid,
+          COUNT(poiid) AS poi_count
+          ${preferredCategoriesIdx ? `, COUNT(CASE WHEN primarycategory = ANY($${preferredCategoriesIdx}) THEN 1 END) AS matching_poi_count` : ', 0 AS matching_poi_count'}
+        FROM pois
+        GROUP BY cityid
+      )
       SELECT
         c.cityid                    AS "cityId",
         c.name                      AS "cityName",
@@ -632,40 +652,18 @@ const destinations_features = async function (req, res) {
         co.name                     AS "countryName",
         c.avgtemperaturelatestyear  AS "avgTemperature",
         c.avgfoodprice              AS "avgFoodPrice",
-        AVG(h.rating)               AS "avgHotelRating",
-        COUNT(DISTINCT h.hotelid)   AS "hotelCount",
-        COUNT(DISTINCT p.poiid)     AS "poiCount",
-        ${
-          preferredCategoriesArray
-            ? `
-        COUNT(
-          DISTINCT CASE
-            WHEN p.primarycategory = ANY($${idx})
-            THEN p.poiid
-          END
-        ) AS "matchingPoiCount"`
-            : `0::int AS "matchingPoiCount"`
-        }
+        COALESCE(hs.avg_rating, 0)  AS "avgHotelRating",
+        COALESCE(hs.hotel_count, 0) AS "hotelCount",
+        COALESCE(ps.poi_count, 0)   AS "poiCount",
+        COALESCE(ps.matching_poi_count, 0) AS "matchingPoiCount"
       FROM cities c
       JOIN countries co ON co.countryid = c.countryid
-      LEFT JOIN hotel h ON h.cityid = c.cityid
-      LEFT JOIN pois   p ON p.cityid = c.cityid
+      LEFT JOIN hotel_stats hs ON hs.cityid = c.cityid
+      LEFT JOIN poi_stats ps ON ps.cityid = c.cityid
       ${whereClause}
-      GROUP BY
-        c.cityid,
-        c.name,
-        co.countryid,
-        co.name,
-        c.avgtemperaturelatestyear,
-        c.avgfoodprice
     `;
 
-    const finalParams =
-      preferredCategoriesArray && params[params.length - 1] !== preferredCategoriesArray
-        ? [...params, preferredCategoriesArray]
-        : params;
-
-    const { rows: cityRows } = await connection.query(query, finalParams);
+    const { rows: cityRows } = await connection.query(query, params);
 
     // Apply minHotelRating / minHotelCount / minPoiCount in JS
     let filteredCities = cityRows.filter((r) => {
@@ -780,41 +778,88 @@ const destinations_features = async function (req, res) {
     scored.sort((a, b) => b.compositeScore - a.compositeScore);
     const top = scored.slice(0, limit);
 
-    // Sample attractions for each destination
-    for (const dest of top) {
-      if (dest.scope === 'city') {
-        const { rows: poiRows } = await connection.query(
+    // OPTIMIZED: Batch fetch sample attractions in a single query instead of N queries
+    if (top.length > 0) {
+      if (scope === 'city') {
+        // Get all city IDs we need attractions for
+        const cityIds = top.map(d => d.id);
+        const { rows: allPoiRows } = await connection.query(
           `
-          SELECT
-            poiid      AS "poiId",
-            name       AS "name",
-            primarycategory AS "category",
-            cityid     AS "cityId"
-          FROM pois
-          WHERE cityid = $1
-          ORDER BY poiid
-          LIMIT 5
-        `,
-          [dest.id],
+          SELECT * FROM (
+            SELECT
+              poiid      AS "poiId",
+              name       AS "name",
+              primarycategory AS "category",
+              cityid     AS "cityId",
+              ROW_NUMBER() OVER (PARTITION BY cityid ORDER BY poiid) AS rn
+            FROM pois
+            WHERE cityid = ANY($1)
+          ) sub
+          WHERE rn <= 5
+          ORDER BY "cityId", rn
+          `,
+          [cityIds]
         );
-        dest.sampleAttractions = poiRows;
+
+        // Group POIs by cityId
+        const poiMap = new Map();
+        for (const poi of allPoiRows) {
+          if (!poiMap.has(poi.cityId)) {
+            poiMap.set(poi.cityId, []);
+          }
+          poiMap.get(poi.cityId).push({
+            poiId: poi.poiId,
+            name: poi.name,
+            category: poi.category,
+            cityId: poi.cityId
+          });
+        }
+
+        // Assign to destinations
+        for (const dest of top) {
+          dest.sampleAttractions = poiMap.get(dest.id) || [];
+        }
       } else {
-        const { rows: poiRows } = await connection.query(
+        // Country scope - batch by country IDs
+        const countryIds = top.map(d => d.countryId);
+        const { rows: allPoiRows } = await connection.query(
           `
-          SELECT
-            p.poiid      AS "poiId",
-            p.name       AS "name",
-            p.primarycategory AS "category",
-            p.cityid     AS "cityId"
-          FROM pois p
-          JOIN cities c ON c.cityid = p.cityid
-          WHERE c.countryid = $1
-          ORDER BY p.poiid
-          LIMIT 5
-        `,
-          [dest.countryId],
+          SELECT * FROM (
+            SELECT
+              p.poiid      AS "poiId",
+              p.name       AS "name",
+              p.primarycategory AS "category",
+              p.cityid     AS "cityId",
+              c.countryid  AS "countryId",
+              ROW_NUMBER() OVER (PARTITION BY c.countryid ORDER BY p.poiid) AS rn
+            FROM pois p
+            JOIN cities c ON c.cityid = p.cityid
+            WHERE c.countryid = ANY($1)
+          ) sub
+          WHERE rn <= 5
+          ORDER BY "countryId", rn
+          `,
+          [countryIds]
         );
-        dest.sampleAttractions = poiRows;
+
+        // Group POIs by countryId
+        const poiMap = new Map();
+        for (const poi of allPoiRows) {
+          if (!poiMap.has(poi.countryId)) {
+            poiMap.set(poi.countryId, []);
+          }
+          poiMap.get(poi.countryId).push({
+            poiId: poi.poiId,
+            name: poi.name,
+            category: poi.category,
+            cityId: poi.cityId
+          });
+        }
+
+        // Assign to destinations
+        for (const dest of top) {
+          dest.sampleAttractions = poiMap.get(dest.countryId) || [];
+        }
       }
     }
 
