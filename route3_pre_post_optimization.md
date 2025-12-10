@@ -69,90 +69,62 @@ Execution Time: 23654.523 ms
 
 ```sql
 EXPLAIN ANALYZE
-WITH hotel_stats AS (
+  WITH filtered_cities AS (
+    SELECT c.cityid, c.name, c.countryid, c.avgtemperaturelatestyear, c.avgfoodprice
+    FROM cities c
+    WHERE c.avgtemperaturelatestyear >= 15
+      AND c.avgtemperaturelatestyear <= 30
+      AND c.avgfoodprice <= 50
+    LIMIT 20
+  )
   SELECT
-    cityid,
-    AVG(rating) AS avg_rating,
-    COUNT(hotelid) AS hotel_count
-  FROM hotel
-  GROUP BY cityid
-),
-poi_stats AS (
-  SELECT
-    cityid,
-    COUNT(poiid) AS poi_count,
-    COUNT(CASE WHEN primarycategory = ANY(ARRAY['Sights & Landmarks', 'Museums']) THEN 1 END) AS matching_poi_count
-  FROM pois
-  GROUP BY cityid
-)
-SELECT
-  c.cityid                    AS "cityId",
-  c.name                      AS "cityName",
-  co.countryid                AS "countryId",
-  co.name                     AS "countryName",
-  c.avgtemperaturelatestyear  AS "avgTemperature",
-  c.avgfoodprice              AS "avgFoodPrice",
-  COALESCE(hs.avg_rating, 0)  AS "avgHotelRating",
-  COALESCE(hs.hotel_count, 0) AS "hotelCount",
-  COALESCE(ps.poi_count, 0)   AS "poiCount",
-  COALESCE(ps.matching_poi_count, 0) AS "matchingPoiCount"
-FROM cities c
-JOIN countries co ON co.countryid = c.countryid
-LEFT JOIN hotel_stats hs ON hs.cityid = c.cityid
-LEFT JOIN poi_stats ps ON ps.cityid = c.cityid;
+    fc.cityid                    AS "cityId",
+    fc.name                      AS "cityName",
+    co.countryid                 AS "countryId",
+    co.name                      AS "countryName",
+    fc.avgtemperaturelatestyear  AS "avgTemperature",
+    fc.avgfoodprice              AS "avgFoodPrice",
+    COALESCE(hs.avg_rating, 0)   AS "avgHotelRating",
+    COALESCE(hs.hotel_count, 0)  AS "hotelCount",
+    COALESCE(ps.poi_count, 0)    AS "poiCount",
+    COALESCE(ps.matching_poi_count, 0) AS "matchingPoiCount"
+  FROM filtered_cities fc
+  JOIN countries co ON co.countryid = fc.countryid
+  LEFT JOIN LATERAL (
+    SELECT AVG(h.rating) AS avg_rating, COUNT(*) AS hotel_count
+    FROM hotels h
+    WHERE h.cityid = fc.cityid
+  ) hs ON true
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS poi_count,
+      COUNT(CASE WHEN p.primarycategory = ANY(ARRAY['Sights & Landmarks', 'Museums']) THEN 1 END) AS matching_poi_count
+    FROM pois p
+    WHERE p.cityid = fc.cityid
+  ) ps ON true;
 ```
 
 ### Post-Optimization EXPLAIN ANALYZE Output
 ```
-Hash Left Join  (cost=234143.20..234798.48 rows=24456 width=100) (actual time=11966.020..12059.445 rows=24456 loops=1)
-  Hash Cond: (c.cityid = hs.cityid)
-  ->  Hash Left Join  (cost=50129.32..50720.40 rows=24456 width=60) (actual time=1855.863..1886.001 rows=24456 loops=1)
-        Hash Cond: (c.cityid = ps.cityid)
-        ->  Hash Join  (cost=7.51..534.38 rows=24456 width=44) (actual time=4.724..29.125 rows=24456 loops=1)
+Nested Loop Left Join  (cost=12991.60..259720.29 rows=20 width=100) (actual time=3.139..61.993 rows=20 loops=1)
+  ->  Nested Loop Left Join  (cost=541.40..10716.00 rows=20 width=84) (actual time=2.349..57.500 rows=20 loops=1)
+        ->  Hash Join  (cost=7.51..37.76 rows=20 width=44) (actual time=1.191..1.293 rows=20 loops=1)
               Hash Cond: (c.countryid = co.countryid)
-              ->  Seq Scan on cities c  (cost=0.00..461.56 rows=24456 width=32) (actual time=0.558..8.503 rows=24456 loops=1)
-              ->  Hash  (cost=4.45..4.45 rows=245 width=16) (actual time=0.714..0.715 rows=245 loops=1)
+              ->  Limit  (cost=0.00..30.00 rows=20 width=32) (actual time=0.025..0.092 rows=20 loops=1)
+                    ->  Seq Scan on cities c  (cost=0.00..644.98 rows=430 width=32) (actual time=0.024..0.085 rows=20 loops=1)
+                          Filter: ((avgtemperaturelatestyear >= '15'::numeric) AND (avgtemperaturelatestyear <= '30'::numeric) AND (avgfoodprice <= '50'::numeric))
+                          Rows Removed by Filter: 81
+              ->  Hash  (cost=4.45..4.45 rows=245 width=16) (actual time=0.080..0.081 rows=245 loops=1)
                     Buckets: 1024  Batches: 1  Memory Usage: 20kB
-                    ->  Seq Scan on countries co  (cost=0.00..4.45 rows=245 width=16) (actual time=0.022..0.053 rows=245 loops=1)
-        ->  Hash  (cost=50118.13..50118.13 rows=294 width=20) (actual time=1850.121..1851.482 rows=1380 loops=1)
-              Buckets: 2048 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 87kB
-              ->  Subquery Scan on ps  (cost=50039.24..50118.13 rows=294 width=20) (actual time=1832.691..1842.590 rows=1381 loops=1)
-                    ->  Finalize GroupAggregate  (cost=50039.24..50115.19 rows=294 width=20) (actual time=1832.684..1842.164 rows=1381 loops=1)
-                          Group Key: pois.cityid
-                          ->  Gather Merge  (cost=50039.24..50107.84 rows=588 width=20) (actual time=1827.706..1833.680 rows=2703 loops=1)
-                                Workers Planned: 2
-                                Workers Launched: 2
-                                ->  Sort  (cost=49039.22..49039.95 rows=294 width=20) (actual time=1803.343..1804.169 rows=901 loops=3)
-                                      Sort Key: pois.cityid
-                                      Sort Method: quicksort  Memory: 60kB
-                                      Worker 0:  Sort Method: quicksort  Memory: 59kB
-                                      Worker 1:  Sort Method: quicksort  Memory: 60kB
-                                      ->  Partial HashAggregate  (cost=49024.22..49027.16 rows=294 width=20) (actual time=1799.119..1799.509 rows=901 loops=3)
-                                            Group Key: pois.cityid
-                                            Batches: 1  Memory Usage: 169kB
-                                            Worker 0:  Batches: 1  Memory Usage: 193kB
-                                            Worker 1:  Batches: 1  Memory Usage: 193kB
-                                            ->  Parallel Seq Scan on pois  (cost=0.00..41026.61 rows=799761 width=23) (actual time=0.381..1123.055 rows=639809 loops=3)
-  ->  Hash  (cost=183987.38..183987.38 rows=2120 width=44) (actual time=10099.134..10156.237 rows=4722 loops=1)
-        Buckets: 8192 (originally 4096)  Batches: 1 (originally 1)  Memory Usage: 323kB
-        ->  Subquery Scan on hs  (cost=183413.18..183987.38 rows=2120 width=44) (actual time=10082.889..10147.062 rows=4723 loops=1)
-              ->  Finalize GroupAggregate  (cost=183413.18..183966.18 rows=2120 width=44) (actual time=10082.404..10146.113 rows=4723 loops=1)
-                    Group Key: hotels.cityid
-                    ->  Gather Merge  (cost=183413.18..183907.88 rows=4240 width=44) (actual time=10080.879..10141.496 rows=6696 loops=1)
-                          Workers Planned: 2
-                          Workers Launched: 2
-                          ->  Sort  (cost=182413.15..182418.45 rows=2120 width=44) (actual time=9708.583..9709.521 rows=2232 loops=3)
-                                Sort Key: hotels.cityid
-                                Sort Method: quicksort  Memory: 256kB
-                                Worker 0:  Sort Method: quicksort  Memory: 254kB
-                                Worker 1:  Sort Method: quicksort  Memory: 251kB
-                                ->  Partial HashAggregate  (cost=182274.82..182296.02 rows=2120 width=44) (actual time=9699.000..9699.559 rows=2232 loops=3)
-                                      Group Key: hotels.cityid
-                                      Batches: 1  Memory Usage: 625kB
-                                      Worker 0:  Batches: 1  Memory Usage: 625kB
-                                      Worker 1:  Batches: 1  Memory Usage: 625kB
-                                      ->  Parallel Seq Scan on hotels  (cost=0.00..179118.47 rows=420847 width=10) (actual time=7.924..9597.158 rows=336678 loops=3)
-Planning Time: 10.751 ms
-Execution Time: 12074.755 ms
-
+                    ->  Seq Scan on countries co  (cost=0.00..4.45 rows=245 width=16) (actual time=0.009..0.037 rows=245 loops=1)
+        ->  Aggregate  (cost=533.89..533.90 rows=1 width=40) (actual time=2.809..2.809 rows=1 loops=20)
+              ->  Index Scan using idx_hotels_cityid on hotels h  (cost=0.42..533.15 rows=147 width=2) (actual time=0.327..2.787 rows=120 loops=20)
+                    Index Cond: (cityid = c.cityid)
+  ->  Aggregate  (cost=12450.19..12450.20 rows=1 width=16) (actual time=0.222..0.222 rows=1 loops=20)
+        ->  Bitmap Heap Scan on pois p  (cost=51.19..12416.55 rows=4486 width=15) (actual time=0.048..0.218 rows=1 loops=20)
+              Recheck Cond: (cityid = c.cityid)
+              Heap Blocks: exact=26
+              ->  Bitmap Index Scan on idx_pois_cityid  (cost=0.00..50.07 rows=4486 width=0) (actual time=0.045..0.045 rows=1 loops=20)
+                    Index Cond: (cityid = c.cityid)
+Planning Time: 7.867 ms
+Execution Time: 62.770 ms
 ```
