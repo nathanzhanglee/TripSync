@@ -624,43 +624,49 @@ const destinations_features = async function (req, res) {
       idx++;
     }
 
-    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const citiesWhereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    // OPTIMIZED: Use CTEs to pre-aggregate hotel and POI statistics
-    // This avoids the cartesian product effect from multiple LEFT JOINs
+    // OPTIMIZED: Push city filtering into CTEs to avoid scanning entire hotel/pois tables
+    // filtered_cities CTE filters cities first, then hotel_stats and poi_stats only aggregate matching rows
     const query = `
-      WITH hotel_stats AS (
+      WITH filtered_cities AS (
+        SELECT c.cityid, c.name, c.countryid, c.avgtemperaturelatestyear, c.avgfoodprice
+        FROM cities c
+        ${citiesWhereClause}
+      ),
+      hotel_stats AS (
         SELECT
-          cityid,
-          AVG(rating) AS avg_rating,
-          COUNT(hotelid) AS hotel_count
-        FROM hotel
-        GROUP BY cityid
+          h.cityid,
+          AVG(h.rating) AS avg_rating,
+          COUNT(*) AS hotel_count
+        FROM hotel h
+        INNER JOIN filtered_cities fc ON fc.cityid = h.cityid
+        GROUP BY h.cityid
       ),
       poi_stats AS (
         SELECT
-          cityid,
-          COUNT(poiid) AS poi_count
-          ${preferredCategoriesIdx ? `, COUNT(CASE WHEN primarycategory = ANY($${preferredCategoriesIdx}) THEN 1 END) AS matching_poi_count` : ', 0 AS matching_poi_count'}
-        FROM pois
-        GROUP BY cityid
+          p.cityid,
+          COUNT(*) AS poi_count
+          ${preferredCategoriesIdx ? `, COUNT(CASE WHEN p.primarycategory = ANY($${preferredCategoriesIdx}) THEN 1 END) AS matching_poi_count` : ', 0 AS matching_poi_count'}
+        FROM pois p
+        INNER JOIN filtered_cities fc ON fc.cityid = p.cityid
+        GROUP BY p.cityid
       )
       SELECT
-        c.cityid                    AS "cityId",
-        c.name                      AS "cityName",
-        co.countryid                AS "countryId",
-        co.name                     AS "countryName",
-        c.avgtemperaturelatestyear  AS "avgTemperature",
-        c.avgfoodprice              AS "avgFoodPrice",
-        COALESCE(hs.avg_rating, 0)  AS "avgHotelRating",
-        COALESCE(hs.hotel_count, 0) AS "hotelCount",
-        COALESCE(ps.poi_count, 0)   AS "poiCount",
+        fc.cityid                    AS "cityId",
+        fc.name                      AS "cityName",
+        co.countryid                 AS "countryId",
+        co.name                      AS "countryName",
+        fc.avgtemperaturelatestyear  AS "avgTemperature",
+        fc.avgfoodprice              AS "avgFoodPrice",
+        COALESCE(hs.avg_rating, 0)   AS "avgHotelRating",
+        COALESCE(hs.hotel_count, 0)  AS "hotelCount",
+        COALESCE(ps.poi_count, 0)    AS "poiCount",
         COALESCE(ps.matching_poi_count, 0) AS "matchingPoiCount"
-      FROM cities c
-      JOIN countries co ON co.countryid = c.countryid
-      LEFT JOIN hotel_stats hs ON hs.cityid = c.cityid
-      LEFT JOIN poi_stats ps ON ps.cityid = c.cityid
-      ${whereClause}
+      FROM filtered_cities fc
+      JOIN countries co ON co.countryid = fc.countryid
+      LEFT JOIN hotel_stats hs ON hs.cityid = fc.cityid
+      LEFT JOIN poi_stats ps ON ps.cityid = fc.cityid
     `;
 
     const { rows: cityRows } = await connection.query(query, params);

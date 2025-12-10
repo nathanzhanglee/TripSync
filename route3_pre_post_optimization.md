@@ -5,17 +5,16 @@
 
 ## Optimization Techniques Applied
 
-### 1. Indexes Created
+### 1. Covering Indexes Created
 ```
-CREATE INDEX idx_hotels_cityid ON hotels(cityid);
-CREATE INDEX idx_pois_cityid ON pois(cityid);
+CREATE INDEX idx_hotels_cityid_rating ON hotels(cityid) INCLUDE (rating);
+CREATE INDEX idx_pois_cityid_category ON pois(cityid) INCLUDE (primarycategory);
 ```
 
-### 2. Query Reconstruction
-- **Separated aggregations using CTEs**: Instead of joining hotels and pois together (causing row explosion), each table is aggregated independently in its own CTE
-- **Early filtering with CTE**: Filter cities first in a `filtered_cities` CTE before joining to large tables
-- **Eliminated COUNT(DISTINCT)**: Pre-aggregation in separate CTEs removes need for expensive distinct counting
-- **Avoided cartesian product**: Original query multiplied hotels × pois per city; CTE approach processes them separately
+### 2. Query Reconstruction: LATERAL Joins
+- **LATERAL subqueries**: Force per-city index lookups instead of full table scans
+- **Index-only scans**: Covering indexes include rating and primarycategory, eliminating heap fetches
+- **Per-row execution**: 897 small index scans instead of scanning entire tables
 
 ---
 
@@ -93,191 +92,117 @@ Execution Time: 35721.238 ms
 
 ---
 
-## Post-Optimization Query
+## Post-Optimization Query (LATERAL Joins + Covering Indexes)
 
 ```sql
 EXPLAIN ANALYZE
-  WITH filtered_cities AS (
-    SELECT c.cityid, c.name, c.countryid, c.avgtemperaturelatestyear, c.avgfoodprice
-    FROM cities c
-    WHERE c.avgtemperaturelatestyear >= 15
-      AND c.avgtemperaturelatestyear <= 30
-      AND c.avgfoodprice <= 50
-  ),
-  hotel_stats AS (
-    SELECT h.cityid, AVG(h.rating) AS avg_rating, COUNT(*) AS hotel_count
-    FROM hotels h
-    INNER JOIN filtered_cities fc ON fc.cityid = h.cityid
-    GROUP BY h.cityid
-  ),
-  poi_stats AS (
-    SELECT p.cityid, COUNT(*) AS poi_count,
-      COUNT(CASE WHEN p.primarycategory = ANY(ARRAY['Sights & Landmarks', 'Museums']) THEN 1 END) AS matching_poi_count
-    FROM pois p
-    INNER JOIN filtered_cities fc ON fc.cityid = p.cityid
-    GROUP BY p.cityid
-  )
-  SELECT
-    fc.cityid                    AS "cityId",
-    fc.name                      AS "cityName",
-    co.countryid                 AS "countryId",
-    co.name                      AS "countryName",
-    fc.avgtemperaturelatestyear  AS "avgTemperature",
-    fc.avgfoodprice              AS "avgFoodPrice",
-    COALESCE(hs.avg_rating, 0)   AS "avgHotelRating",
-    COALESCE(hs.hotel_count, 0)  AS "hotelCount",
-    COALESCE(ps.poi_count, 0)    AS "poiCount",
-    COALESCE(ps.matching_poi_count, 0) AS "matchingPoiCount"
-  FROM filtered_cities fc
-  JOIN countries co ON co.countryid = fc.countryid
-  LEFT JOIN hotel_stats hs ON hs.cityid = fc.cityid
-  LEFT JOIN poi_stats ps ON ps.cityid = fc.cityid;
+SELECT
+  c.cityid                    AS "cityId",
+  c.name                      AS "cityName",
+  co.countryid                AS "countryId",
+  co.name                     AS "countryName",
+  c.avgtemperaturelatestyear  AS "avgTemperature",
+  c.avgfoodprice              AS "avgFoodPrice",
+  COALESCE(hs.avg_rating, 0)  AS "avgHotelRating",
+  COALESCE(hs.hotel_count, 0) AS "hotelCount",
+  COALESCE(ps.poi_count, 0)   AS "poiCount",
+  COALESCE(ps.matching_poi_count, 0) AS "matchingPoiCount"
+FROM cities c
+JOIN countries co ON co.countryid = c.countryid
+LEFT JOIN LATERAL (
+  SELECT AVG(h.rating) AS avg_rating, COUNT(*) AS hotel_count
+  FROM hotels h
+  WHERE h.cityid = c.cityid
+) hs ON true
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS poi_count,
+    COUNT(CASE WHEN p.primarycategory = ANY(ARRAY['Sights & Landmarks', 'Museums']) THEN 1 END) AS matching_poi_count
+  FROM pois p
+  WHERE p.cityid = c.cityid
+) ps ON true
+WHERE c.avgtemperaturelatestyear >= 15
+  AND c.avgtemperaturelatestyear <= 30
+  AND c.avgfoodprice <= 50;
 ```
 
 ### Post-Optimization EXPLAIN ANALYZE Output
 ```
-Hash Left Join  (cost=275953.23..275960.84 rows=2054 width=656) (actual time=13494.428..13507.155 rows=897 loops=1)
-  Hash Cond: (fc.cityid = hs.cityid)
-  CTE filtered_cities
-    ->  Seq Scan on cities c  (cost=0.00..644.98 rows=430 width=32) (actual time=1.375..17.578 rows=897 loops=1)
-          Filter: ((avgtemperaturelatestyear >= '15'::numeric) AND (avgtemperaturelatestyear <= '30'::numeric) AND (avgfoodprice <= '50'::numeric))
-          Rows Removed by Filter: 23559
-  ->  Merge Left Join  (cost=85327.89..85334.36 rows=430 width=616) (actual time=3665.238..3676.066 rows=897 loops=1)
-        Merge Cond: (fc.cityid = ps.cityid)
-        ->  Sort  (cost=36.07..37.15 rows=430 width=600) (actual time=19.164..24.540 rows=897 loops=1)
-              Sort Key: fc.cityid
-              Sort Method: quicksort  Memory: 81kB
-              ->  Hash Join  (cost=7.51..17.26 rows=430 width=600) (actual time=2.050..19.393 rows=897 loops=1)
-                    Hash Cond: (fc.countryid = co.countryid)
-                    ->  CTE Scan on filtered_cities fc  (cost=0.00..8.60 rows=430 width=588) (actual time=1.379..17.925 rows=897 loops=1)
-                    ->  Hash  (cost=4.45..4.45 rows=245 width=16) (actual time=0.090..0.096 rows=245 loops=1)
-                          Buckets: 1024  Batches: 1  Memory Usage: 20kB
-                          ->  Seq Scan on countries co  (cost=0.00..4.45 rows=245 width=16) (actual time=0.020..0.049 rows=245 loops=1)
-        ->  Sort  (cost=85291.82..85292.54 rows=288 width=20) (actual time=3644.865..3646.676 rows=316 loops=1)
-              Sort Key: ps.cityid
-              Sort Method: quicksort  Memory: 37kB
-              ->  Subquery Scan on ps  (cost=85274.29..85280.05 rows=288 width=20) (actual time=3639.214..3639.974 rows=316 loops=1)
-                    ->  HashAggregate  (cost=85274.29..85277.17 rows=288 width=20) (actual time=3639.213..3639.942 rows=316 loops=1)
-                          Group Key: p.cityid
-                          Batches: 1  Memory Usage: 61kB
-                          ->  Hash Join  (cost=13.97..72355.95 rows=1291834 width=19) (actual time=1.935..3352.913 rows=735831 loops=1)
-                                Hash Cond: (p.cityid = fc_1.cityid)
-                                ->  Seq Scan on pois p  (cost=0.00..52225.10 rows=1919610 width=19) (actual time=0.807..2300.252 rows=1919427 loops=1)
-                                ->  Hash  (cost=8.60..8.60 rows=430 width=4) (actual time=1.114..1.122 rows=897 loops=1)
-                                      Buckets: 1024  Batches: 1  Memory Usage: 40kB
-                                      ->  CTE Scan on filtered_cities fc_1  (cost=0.00..8.60 rows=430 width=4) (actual time=0.003..0.108 rows=897 loops=1)
-  ->  Hash  (cost=189954.68..189954.68 rows=2054 width=44) (actual time=9821.000..9821.004 rows=482 loops=1)
-        Buckets: 4096  Batches: 1  Memory Usage: 60kB
-        ->  Subquery Scan on hs  (cost=189908.47..189954.68 rows=2054 width=44) (actual time=9814.038..9815.613 rows=482 loops=1)
-              ->  HashAggregate  (cost=189908.47..189934.14 rows=2054 width=44) (actual time=9814.036..9814.275 rows=482 loops=1)
-                    Group Key: h.cityid
-                    Batches: 1  Memory Usage: 241kB
-                    ->  Hash Join  (cost=13.97..189435.68 rows=63038 width=6) (actual time=57.426..9686.963 rows=68057 loops=1)
-                          Hash Cond: (h.cityid = fc_2.cityid)
-                          ->  Seq Scan on hotels h  (cost=0.00..185005.51 rows=1009551 width=6) (actual time=20.835..9347.360 rows=1010033 loops=1)
-                          ->  Hash  (cost=8.60..8.60 rows=430 width=4) (actual time=4.682..4.683 rows=897 loops=1)
-                                Buckets: 1024  Batches: 1  Memory Usage: 40kB
-                                ->  CTE Scan on filtered_cities fc_2  (cost=0.00..8.60 rows=430 width=4) (actual time=2.706..2.823 rows=897 loops=1)
-Planning Time: 27.977 ms
-Execution Time: 13544.411 ms
-
+Nested Loop Left Join  (cost=198.53..82807.29 rows=430 width=100) (actual time=0.132..1830.030 rows=897 loops=1)
+  ->  Nested Loop Left Join  (cost=15.22..3978.62 rows=430 width=84) (actual time=0.122..254.001 rows=897 loops=1)
+        ->  Hash Join  (cost=7.51..653.64 rows=430 width=44) (actual time=0.103..116.432 rows=897 loops=1)
+              Hash Cond: (c.countryid = co.countryid)
+              ->  Seq Scan on cities c  (cost=0.00..644.98 rows=430 width=32) (actual time=0.021..115.786 rows=897 loops=1)
+                    Filter: ((avgtemperaturelatestyear >= '15'::numeric) AND (avgtemperaturelatestyear <= '30'::numeric) AND (avgfoodprice <= '50'::numeric))
+                    Rows Removed by Filter: 23559
+              ->  Hash  (cost=4.45..4.45 rows=245 width=16) (actual time=0.075..0.076 rows=245 loops=1)
+                    Buckets: 1024  Batches: 1  Memory Usage: 20kB
+                    ->  Seq Scan on countries co  (cost=0.00..4.45 rows=245 width=16) (actual time=0.006..0.032 rows=245 loops=1)
+        ->  Aggregate  (cost=7.71..7.72 rows=1 width=40) (actual time=0.153..0.153 rows=1 loops=897)
+              ->  Index Only Scan using idx_hotels_cityid_rating on hotels h  (cost=0.42..6.98 rows=146 width=2) (actual time=0.056..0.146 rows=76 loops=897)
+                    Index Cond: (cityid = c.cityid)
+                    Heap Fetches: 0
+  ->  Aggregate  (cost=183.30..183.31 rows=1 width=16) (actual time=1.756..1.756 rows=1 loops=897)
+        ->  Index Only Scan using idx_pois_cityid_category on pois p  (cost=0.43..152.44 rows=4115 width=15) (actual time=0.076..1.656 rows=820 loops=897)
+              Index Cond: (cityid = c.cityid)
+              Heap Fetches: 0
+Planning Time: 11.421 ms
+Execution Time: 1831.382 ms
 ```
 
----
 
 ## Performance Summary
 
-| Metric | Pre-Optimization | Post-Optimization | Improvement |
-|--------|------------------|-------------------|-------------|
-| Execution Time | 35,721 ms | 13,544 ms | **2.6x faster** |
-| Planning Time | 4.7 ms | 28.0 ms | Increased (more complex plan) |
-| Rows Processed | 8,972,843 intermediate rows | 735,831 + 68,057 rows | **~10x reduction** |
-| Memory/Disk Usage | Peak 446MB disk (external merge) | In-memory only (241kB peak) | **Eliminated disk spill** |
-| Scan Type (hotels) | Index Scan (via Memoize) | Seq Scan + Hash Join | Changed strategy |
-| Scan Type (pois) | Parallel Seq Scan | Seq Scan + Hash Join | Similar approach |
-
-### Key Performance Insights
-
-1. **Execution Time**: Reduced from ~35.7 seconds to ~13.5 seconds (62% improvement)
-2. **Disk I/O Eliminated**: Pre-optimization required external merge sorts spilling to disk (up to 446MB). Post-optimization runs entirely in memory.
-3. **Row Explosion Avoided**: The original query's cartesian product between hotels and pois per city created 8.9M intermediate rows. The CTE approach processes each table independently.
-4. **Trade-off**: Planning time increased from 4.7ms to 28ms due to the more complex CTE structure, but this is negligible compared to execution time savings.
+| Metric | Pre-Optimization | Post-Optimization |
+|--------|------------------|-------------------|
+| Execution Time | 35,721 ms | 1,831 ms |
+| Hotels scanned | 8,972,843 intermediate rows | 68,057 (76 rows × 897 cities) |
+| POIs scanned | 1,919,427 (full seq scan) | 735,831 (820 rows × 897 cities) |
+| Index usage | Partial (Memoize on hotels) | Index-only scans (no heap fetches) |
+| Memory/Disk | 446MB disk spill | Minimal in-memory |
+| Improvement | - | 19.5x faster|
 
 ---
 
 ## Query Reconstruction Explanation
 
-### Original Query Problems
-
-The pre-optimization query suffered from a **row explosion problem**:
-
+The original query suffered from a row explosion problem:
 ```
-cities (897 rows) × hotels (~76 per city) × pois (~820 per city) = 8,972,843 rows
+cities (897 rows) × hotels (~76 per city) × pois (~820 per city) = 8,972,843 intermediate rows
 ```
 
-This massive intermediate result set required:
+This caused:
 - External merge sorts spilling 446MB to disk
 - Expensive `COUNT(DISTINCT)` operations to de-duplicate
-- Parallel workers struggling with data volume
+- Full sequential scan on the pois table (1.9M rows)
 
-### Reconstruction Strategy
+### How LATERAL Joins + Covering Indexes Fix This
 
-#### Step 1: Early Filtering with CTE
+#### 1. LATERAL Subqueries
 ```sql
-WITH filtered_cities AS (
-  SELECT c.cityid, c.name, c.countryid, c.avgtemperaturelatestyear, c.avgfoodprice
-  FROM cities c
-  WHERE c.avgtemperaturelatestyear >= 15
-    AND c.avgtemperaturelatestyear <= 30
-    AND c.avgfoodprice <= 50
-)
-```
-- Filters 24,456 cities down to 897 matching cities upfront
-- Result is materialized once and reused 3 times
-
-#### Step 2: Pre-Aggregate Hotels Separately
-```sql
-hotel_stats AS (
-  SELECT h.cityid, AVG(h.rating) AS avg_rating, COUNT(*) AS hotel_count
+LEFT JOIN LATERAL (
+  SELECT AVG(h.rating) AS avg_rating, COUNT(*) AS hotel_count
   FROM hotels h
-  INNER JOIN filtered_cities fc ON fc.cityid = h.cityid
-  GROUP BY h.cityid
-)
+  WHERE h.cityid = c.cityid
+) hs ON true
 ```
-- Joins only to filtered cities (897 rows)
-- Aggregates 68,057 hotel rows → 482 result rows
-- No cartesian product with POIs
+- Executes subquery **for each city row** (897 times)
+- Each execution uses an index lookup, not a full table scan
+- Aggregates per-city data before joining, avoiding row explosion
 
-#### Step 3: Pre-Aggregate POIs Separately
+#### 2. Covering Indexes Enable Index-Only Scans
 ```sql
-poi_stats AS (
-  SELECT p.cityid, COUNT(*) AS poi_count,
-    COUNT(CASE WHEN p.primarycategory = ANY(ARRAY['Sights & Landmarks', 'Museums']) THEN 1 END) AS matching_poi_count
-  FROM pois p
-  INNER JOIN filtered_cities fc ON fc.cityid = p.cityid
-  GROUP BY p.cityid
-)
+CREATE INDEX idx_hotels_cityid_rating ON hotels(cityid) INCLUDE (rating);
+CREATE INDEX idx_pois_cityid_category ON pois(cityid) INCLUDE (primarycategory);
 ```
-- Joins only to filtered cities (897 rows)
-- Aggregates 735,831 POI rows → 316 result rows
-- No cartesian product with hotels
+- Index includes all columns needed for the query (`cityid` + `rating`/`primarycategory`)
+- PostgreSQL can satisfy the query entirely from the index
+- `Heap Fetches: 0` in EXPLAIN output confirms no table access needed
 
-#### Step 4: Final Assembly
-```sql
-SELECT ...
-FROM filtered_cities fc
-JOIN countries co ON co.countryid = fc.countryid
-LEFT JOIN hotel_stats hs ON hs.cityid = fc.cityid
-LEFT JOIN poi_stats ps ON ps.cityid = fc.cityid
-```
-- Joins small, pre-aggregated result sets
-- 897 × 1 × 1 = 897 final rows (no explosion)
+### Key EXPLAIN Output Indicators
 
-### Why This Works
-
-| Aspect | Original | Reconstructed |
-|--------|----------|---------------|
-| Join Order | cities → hotels → pois (multiplicative) | cities, then hotels separately, pois separately |
-| Intermediate Rows | 8.9 million | 68K + 736K (processed separately) |
-| Aggregation | Post-join DISTINCT counting | Pre-join GROUP BY |
-| Memory | 446MB disk spill | 241KB in-memory |
+| Indicator | Pre-Optimization | Post-Optimization |
+|-----------|------------------|-------------------|
+| Scan type | `Parallel Seq Scan on pois` | `Index Only Scan using idx_pois_cityid_category` |
+| Heap fetches | N/A (full table scan) | `Heap Fetches: 0` |
+| Intermediate rows | 8,972,843 | 897 (one per city) |
+| Disk usage | 446MB external merge | None |
