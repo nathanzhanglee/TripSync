@@ -21,3 +21,9 @@ Create a `config.json` file in the `server` directory with the following structu
 Use `npm install` to install.
 Use `npm run dev` to start the server in development mode with auto-reloading.
 Use `npm start` to start the server in production mode.
+
+### Frontend
+
+cd frontend
+npm install
+npm run dev
