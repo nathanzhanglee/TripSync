@@ -142,10 +142,17 @@ export async function generateItinerary(params: {
   avoidCategories?: string[];
   level?: 'city' | 'country';
 }): Promise<ItineraryResponse> {
+  // Backend expects cityId (singular), so use the first city from the array
+  const cityId = params.cityIds && params.cityIds.length > 0 ? params.cityIds[0] : null;
+  
+  if (!cityId && params.level !== 'country') {
+    throw new Error('At least one city ID is required');
+  }
+
   return apiCall<ItineraryResponse>('/planning/itineraries', {
     method: 'POST',
     body: JSON.stringify({
-      cityIds: params.cityIds,
+      cityId: cityId,
       numDays: params.numDays,
       poisPerDay: params.poisPerDay,
       preferredCategoriesByDay: params.preferredCategoriesByDay,

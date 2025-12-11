@@ -87,18 +87,20 @@ export function PlanningPage() {
 
   if (cityIds.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle>No Cities Selected</CardTitle>
-            <CardDescription>Please select cities from the Discover page first</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => navigate('/discover')} className="w-full">
-              Go to Discover
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen">
+        <div className="container mx-auto px-4 py-8 max-w-6xl">
+          <Card className="bg-white/80 backdrop-blur shadow-xl border-indigo-100">
+            <CardHeader>
+              <CardTitle>No Cities Selected</CardTitle>
+              <CardDescription>Please select cities from the Discover page first</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={() => navigate('/discover')} className="w-full">
+                Go to Discover
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
