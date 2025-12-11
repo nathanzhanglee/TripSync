@@ -98,108 +98,6 @@ const destinations_availability_cities = async function (req, res) {
 };
 
 // ----------------------
-// Route 2: countries
-// ----------------------
-// const destinations_availability_countries = async function (req, res) {
-//   const {
-//     originCityIds,
-//     requireAllReach = false,
-//     maxStop = 1,
-//     maxTravelTime = null, // unused for now
-//     limit = 20
-//   } = req.body || {};
-
-//   if (!Array.isArray(originCityIds) || originCityIds.length === 0) {
-//     return res.status(400).json({
-//       error: "originCityIds must be a non-empty array of integers."
-//     });
-//   }
-
-//   const originCount = originCityIds.length;
-//   const maxStopsNum = Number(maxStop);
-//   const maxStopsEffective =
-//     Number.isInteger(maxStopsNum) && maxStopsNum >= 0 ? maxStopsNum : 1;
-//   const limitEffective = Number(limit) > 0 ? Number(limit) : 20;
-
-//   const sql = `
-//     WITH origins AS (
-//       -- Expand origin city IDs
-//       SELECT unnest($1::int[]) AS origin_city_id
-//     ),
-//     origin_airports AS (
-//       -- Airports in each origin city
-//       SELECT DISTINCT
-//         o.origin_city_id,
-//         a.airportid AS origin_airport_id
-//       FROM origins o
-//       JOIN airports a
-//         ON a.cityid = o.origin_city_id
-//     ),
-//     reachable AS (
-//       -- Routes from origin airports to destination airports,
-//       -- then map destination airports back to destination cities
-//       SELECT
-//         oa.origin_city_id,
-//         a_dest.cityid AS dest_city_id
-//       FROM origin_airports oa
-//       JOIN routes r
-//         ON r.sourceid = oa.origin_airport_id
-//       JOIN airports a_dest
-//         ON a_dest.airportid = r.destinationid
-//       WHERE r.stops <= $2
-//     ),
-//     country_reach AS (
-//       -- Map reachable destination cities to their countries
-//       SELECT DISTINCT
-//         r.origin_city_id,
-//         c.countryid AS dest_country_id
-//       FROM reachable r
-//       JOIN cities c
-//         ON c.cityid = r.dest_city_id
-//     ),
-//     dest_agg AS (
-//       -- Aggregate which origins can reach each destination country
-//       SELECT
-//         dest_country_id,
-//         array_agg(DISTINCT origin_city_id) AS reachable_from,
-//         COUNT(DISTINCT origin_city_id)     AS origin_reach_count
-//       FROM country_reach
-//       GROUP BY dest_country_id
-//     )
-//     SELECT
-//       co.countryid AS "countryId",
-//       co.name      AS "countryName",
-//       (dest_agg.origin_reach_count = $3) AS "reachableFromAll",
-//       dest_agg.reachable_from            AS "reachableFrom"
-//     FROM dest_agg
-//     JOIN countries co
-//       ON co.countryid = dest_agg.dest_country_id
-//     WHERE ($4::boolean = false OR dest_agg.origin_reach_count = $3)
-//     ORDER BY "reachableFromAll" DESC, "countryName"
-//     LIMIT $5;
-//   `;
-
-//   const params = [
-//     originCityIds,      // $1 :: integer[]
-//     maxStopsEffective,  // $2
-//     originCount,        // $3
-//     requireAllReach,    // $4
-//     limitEffective      // $5
-//   ];
-
-//   try {
-//     const { rows } = await connection.query(sql, params);
-//     return res.json({ destinations: rows });
-//   } catch (err) {
-//     console.error("Route 2 error:", err);
-//     return res.status(500).json({
-//       error: "Database query failed",
-//       destinations: []
-//     });
-//   }
-// };
-
-// ----------------------
 // Route 3: POST /destinations/features
 // ----------------------
 const destinations_features = async function (req, res) {
@@ -620,7 +518,6 @@ function normalizeWeights(raw) {
 
 module.exports = {
   destinations_availability_cities,
-  // destinations_availability_countries,
   destinations_features,
   destinations_random,
 };
