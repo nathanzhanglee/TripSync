@@ -155,6 +155,124 @@ describe("destinations_features (scope=city)", () => {
     expect(connection.query).toHaveBeenCalledTimes(1);
   });
 
+  it("builds WHERE clause from candidateCityIds, minTemp, maxTemp, maxAvgFoodPrice", async () => {
+    // 1st query: city rows
+    connection.query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            cityId: 1,
+            cityName: "City A",
+            countryId: 1,
+            countryName: "Country A",
+            avgTemperature: 20,
+            avgFoodPrice: 10,
+            avgHotelRating: 4,
+            hotelCount: 5,
+            poiCount: 10,
+            matchingPoiCount: 3
+          }
+        ]
+      })
+      // 2nd query: POIs (can be empty, we just need it not to crash)
+      .mockResolvedValueOnce({
+        rows: []
+      });
+  
+    const req = {
+      body: {
+        scope: "city",
+        candidateCityIds: [1, 2],
+        minTemp: 15,
+        maxTemp: 30,
+        maxAvgFoodPrice: 50
+      }
+    };
+    const res = createMockRes();
+  
+    await destinations_features(req, res);
+  
+    // Check first call (the main query)
+    const [sql, params] = connection.query.mock.calls[0];
+  
+    expect(sql).toContain("WHERE c.cityid = ANY($1)");
+    expect(sql).toContain("c.avgtemperaturelatestyear >= $2");
+    expect(sql).toContain("c.avgtemperaturelatestyear <= $3");
+    expect(sql).toContain("c.avgfoodprice <= $4");
+  
+    expect(params[0]).toEqual([1, 2]); // candidateCityIds
+    expect(params[1]).toBe(15);        // minTemp
+    expect(params[2]).toBe(30);        // maxTemp
+    expect(params[3]).toBe(50);        // maxAvgFoodPrice
+  
+    // And it still returns a valid response
+    const responseArg = res.json.mock.calls[0][0];
+    expect(Array.isArray(responseArg.destinations)).toBe(true);
+    expect(responseArg.destinations.length).toBe(1);
+  });  
+
+  it("filters out cities below minHotelRating", async () => {
+    connection.query.mockResolvedValueOnce({
+      rows: [
+        {
+          cityId: 1,
+          cityName: "Low Hotel City",
+          countryId: 1,
+          countryName: "Country A",
+          avgTemperature: 20,
+          avgFoodPrice: 10,
+          avgHotelRating: 3, // below threshold
+          hotelCount: 10,
+          poiCount: 10,
+          matchingPoiCount: 0
+        }
+      ]
+    });
+  
+    const req = {
+      body: {
+        scope: "city",
+        minHotelRating: 4
+      }
+    };
+    const res = createMockRes();
+  
+    await destinations_features(req, res);
+  
+    expect(res.json).toHaveBeenCalledWith({ destinations: [] });
+  });
+
+  it("filters out cities below minPoiCount", async () => {
+    connection.query.mockResolvedValueOnce({
+      rows: [
+        {
+          cityId: 1,
+          cityName: "Few POIs City",
+          countryId: 1,
+          countryName: "Country A",
+          avgTemperature: 20,
+          avgFoodPrice: 10,
+          avgHotelRating: 5, // passes hotel rating
+          hotelCount: 10,
+          poiCount: 2,       // below threshold
+          matchingPoiCount: 0
+        }
+      ]
+    });
+  
+    const req = {
+      body: {
+        scope: "city",
+        minPoiCount: 3
+      }
+    };
+    const res = createMockRes();
+  
+    await destinations_features(req, res);
+  
+    expect(res.json).toHaveBeenCalledWith({ destinations: [] });
+  });  
+
   it("returns scored city destinations with sampleAttractions", async () => {
     // 1st query: city rows
     connection.query
@@ -326,6 +444,18 @@ describe("destinations_random", () => {
       error: 'scope must be "city" or "country"'
     });
   });
+
+  it("returns null when no city rows are found", async () => {
+    // For scope=city, destinations_random does one query
+    connection.query.mockResolvedValueOnce({ rows: [] });
+  
+    const req = { query: { scope: "city" } };
+    const res = createMockRes();
+  
+    await destinations_random(req, res);
+  
+    expect(res.json).toHaveBeenCalledWith(null);
+  });  
 
   it("returns a random country when scope=country", async () => {
     connection.query.mockResolvedValueOnce({

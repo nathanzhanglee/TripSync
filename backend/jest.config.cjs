@@ -3,7 +3,10 @@ module.exports = {
     collectCoverage: true,
     collectCoverageFrom: [
         "routes/destinations.js",
-        "routes/recommendations.js"
+        "routes/recommendations.js",
+        "routes/cities.js",
+        "routes/countries.js",
+        "routes/planning.js"
     ],
     coverageThreshold: {
         global: {
