@@ -369,3 +369,54 @@ export async function getRecommendationsCitiesWarmBudget(params?: {
   return apiCall<WarmBudgetResponse>(`/recommendations/cities/warm-budget?${queryParams.toString()}`);
 }
 
+// Route 14: GET /recommendations/cities/balanced
+export interface BalancedCity {
+  cityId: number;
+  cityName: string;
+  countryName: string;
+  avgFoodPrice: number;
+  attractionCount: number;
+  avgHotelRating: number;
+  foodScore: number;
+  attractionsScore: number;
+  hotelScore: number;
+  compositeScore: number;
+}
+
+export interface BalancedResponse {
+  cities: BalancedCity[];
+  limit: number;
+}
+
+export async function getRecommendationsCitiesBalanced(limit: number = 20): Promise<BalancedResponse> {
+  return apiCall<BalancedResponse>(`/recommendations/cities/balanced?limit=${limit}`);
+}
+
+// Route 15: GET /recommendations/cities/best-per-country
+export interface BestPerCountryCity {
+  countryId: number;
+  countryName: string;
+  cityId: number;
+  cityName: string;
+  poiCount: number;
+  hotelCount: number;
+  avgHotelRating: number;
+}
+
+export interface BestPerCountryResponse {
+  bestCities: BestPerCountryCity[];
+  minPoi: number;
+  minHotels: number;
+}
+
+export async function getRecommendationsCitiesBestPerCountry(params?: {
+  minPoi?: number;
+  minHotels?: number;
+}): Promise<BestPerCountryResponse> {
+  const queryParams = new URLSearchParams();
+  if (params?.minPoi) queryParams.append('minPoi', params.minPoi.toString());
+  if (params?.minHotels) queryParams.append('minHotels', params.minHotels.toString());
+  
+  return apiCall<BestPerCountryResponse>(`/recommendations/cities/best-per-country?${queryParams.toString()}`);
+}
+
