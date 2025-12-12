@@ -8,7 +8,7 @@ const destinations_availability_cities = async function (req, res) {
     originCityIds,
     requireAllReach = false,
     maxStop = 1,
-    maxTravelTime = null, // unused for now
+    maxTravelTime = null,
     limit = 20
   } = req.body || {};
 
@@ -103,7 +103,7 @@ const destinations_availability_cities = async function (req, res) {
 const destinations_features = async function (req, res) {
   try {
     const {
-      scope, // "city" | "country"
+      scope,
       candidateCityIds,
       minTemp,
       maxTemp,
@@ -111,7 +111,7 @@ const destinations_features = async function (req, res) {
       minHotelRating,
       minHotelCount,
       minPoiCount,
-      preferredCategories, // list of primarycategory values
+      preferredCategories,
       weights: rawWeights,
       limit: rawLimit,
     } = req.body || {};
@@ -162,8 +162,6 @@ const destinations_features = async function (req, res) {
 
     const citiesWhereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    // OPTIMIZED: Push city filtering into CTEs to avoid scanning entire hotel/pois tables
-    // filtered_cities CTE filters cities first, then hotel_stats and poi_stats only aggregate matching rows
     const query = `
       WITH filtered_cities AS (
         SELECT c.cityid, c.name, c.countryid, c.avgtemperaturelatestyear, c.avgfoodprice
@@ -183,7 +181,9 @@ const destinations_features = async function (req, res) {
         SELECT
           p.cityid,
           COUNT(*) AS poi_count
-          ${preferredCategoriesIdx ? `, COUNT(CASE WHEN p.primarycategory = ANY($${preferredCategoriesIdx}) THEN 1 END) AS matching_poi_count` : ', 0 AS matching_poi_count'}
+          ${preferredCategoriesIdx
+            ? `, COUNT(CASE WHEN p.primarycategory = ANY($${preferredCategoriesIdx}) THEN 1 END) AS matching_poi_count`
+            : ', 0 AS matching_poi_count'}
         FROM pois p
         INNER JOIN filtered_cities fc ON fc.cityid = p.cityid
         GROUP BY p.cityid
@@ -207,7 +207,7 @@ const destinations_features = async function (req, res) {
 
     const { rows: cityRows } = await connection.query(query, params);
 
-    // Apply minHotelRating / minHotelCount / minPoiCount in JS
+    // Apply minHotelRating / minHotelCount / minPoiCount
     let filteredCities = cityRows.filter((r) => {
       if (minHotelRating != null && r.avgHotelRating != null && r.avgHotelRating < minHotelRating) {
         return false;
@@ -225,8 +225,9 @@ const destinations_features = async function (req, res) {
       return res.json({ destinations: [] });
     }
 
-    // If scope="country", aggregate cities into countries
+    // Build destinations
     let destinations;
+
     if (scope === 'city') {
       destinations = filteredCities.map((r) => ({
         id: r.cityId,
@@ -242,6 +243,7 @@ const destinations_features = async function (req, res) {
         matchingPoiCount: Number(r.matchingPoiCount),
       }));
     } else {
+      // COUNTRY SCOPE: aggregate cities into countries
       const map = new Map();
       for (const r of filteredCities) {
         const key = r.countryId;
@@ -269,28 +271,86 @@ const destinations_features = async function (req, res) {
         entry.matchingPoiCount += Number(r.matchingPoiCount);
       }
 
+      // Add country-only hotels/pois (cityid IS NULL) into the same country aggregates
+      const countryIds = Array.from(map.keys());
+
+      if (countryIds.length > 0) {
+        // Country-only hotels
+        const { rows: countryHotelRows } = await connection.query(
+          `
+          SELECT
+            countryid AS "countryId",
+            COUNT(*)::int AS "hotelCount",
+            AVG(rating)::float8 AS "avgHotelRating"
+          FROM hotels
+          WHERE cityid IS NULL AND countryid = ANY($1)
+          GROUP BY countryid
+          `,
+          [countryIds],
+        );
+
+        for (const r of countryHotelRows) {
+          const entry = map.get(r.countryId);
+          if (!entry) continue;
+          entry.hotelCount += Number(r.hotelCount) || 0;
+          if (r.avgHotelRating != null) entry.hotelRatings.push(Number(r.avgHotelRating));
+        }
+
+        // Country-only POIs
+        let countryPoiSql;
+        let countryPoiParams;
+
+        if (preferredCategories && preferredCategories.length) {
+          countryPoiSql = `
+            SELECT
+              countryid AS "countryId",
+              COUNT(*)::int AS "poiCount",
+              COUNT(*) FILTER (WHERE primarycategory = ANY($2))::int AS "matchingPoiCount"
+            FROM pois
+            WHERE cityid IS NULL AND countryid = ANY($1)
+            GROUP BY countryid
+          `;
+          countryPoiParams = [countryIds, preferredCategories];
+        } else {
+          countryPoiSql = `
+            SELECT
+              countryid AS "countryId",
+              COUNT(*)::int AS "poiCount",
+              0::int AS "matchingPoiCount"
+            FROM pois
+            WHERE cityid IS NULL AND countryid = ANY($1)
+            GROUP BY countryid
+          `;
+          countryPoiParams = [countryIds];
+        }
+
+        const { rows: countryPoiRows } = await connection.query(countryPoiSql, countryPoiParams);
+
+        for (const r of countryPoiRows) {
+          const entry = map.get(r.countryId);
+          if (!entry) continue;
+          entry.poiCount += Number(r.poiCount) || 0;
+          entry.matchingPoiCount += Number(r.matchingPoiCount) || 0;
+        }
+      }
+
+      // Now materialize destinations AFTER adding country-only stats
       destinations = Array.from(map.values()).map((e) => ({
         id: e.id,
         scope: 'country',
         name: e.name,
         countryId: e.countryId,
         countryName: e.countryName,
-        avgTemperature: e.temps.length
-          ? e.temps.reduce((a, b) => a + b, 0) / e.temps.length
-          : null,
-        avgFoodPrice: e.foodPrices.length
-          ? e.foodPrices.reduce((a, b) => a + b, 0) / e.foodPrices.length
-          : null,
-        avgHotelRating: e.hotelRatings.length
-          ? e.hotelRatings.reduce((a, b) => a + b, 0) / e.hotelRatings.length
-          : null,
+        avgTemperature: e.temps.length ? e.temps.reduce((a, b) => a + b, 0) / e.temps.length : null,
+        avgFoodPrice: e.foodPrices.length ? e.foodPrices.reduce((a, b) => a + b, 0) / e.foodPrices.length : null,
+        avgHotelRating: e.hotelRatings.length ? e.hotelRatings.reduce((a, b) => a + b, 0) / e.hotelRatings.length : null,
         hotelCount: e.hotelCount,
         poiCount: e.poiCount,
         matchingPoiCount: e.matchingPoiCount,
       }));
     }
 
-    // Min–max normalization within this result set
+    // Min–max normalization within this result set (unchanged)
     const maxFood = Math.max(...destinations.map((d) => d.avgFoodPrice || 0), 1);
     const maxPoi = Math.max(...destinations.map((d) => d.poiCount || 0), 1);
     const maxHotels = Math.max(...destinations.map((d) => d.hotelCount || 0), 1);
@@ -320,10 +380,9 @@ const destinations_features = async function (req, res) {
     scored.sort((a, b) => b.compositeScore - a.compositeScore);
     const top = scored.slice(0, limit);
 
-    // OPTIMIZED: Batch fetch sample attractions in a single query instead of N queries
+    // Batch fetch sample attractions (drop-in fix for country scope query)
     if (top.length > 0) {
       if (scope === 'city') {
-        // Get all city IDs we need attractions for
         const cityIds = top.map(d => d.id);
         const { rows: allPoiRows } = await connection.query(
           `
@@ -343,12 +402,9 @@ const destinations_features = async function (req, res) {
           [cityIds]
         );
 
-        // Group POIs by cityId
         const poiMap = new Map();
         for (const poi of allPoiRows) {
-          if (!poiMap.has(poi.cityId)) {
-            poiMap.set(poi.cityId, []);
-          }
+          if (!poiMap.has(poi.cityId)) poiMap.set(poi.cityId, []);
           poiMap.get(poi.cityId).push({
             poiId: poi.poiId,
             name: poi.name,
@@ -357,12 +413,11 @@ const destinations_features = async function (req, res) {
           });
         }
 
-        // Assign to destinations
         for (const dest of top) {
           dest.sampleAttractions = poiMap.get(dest.id) || [];
         }
       } else {
-        // Country scope - batch by country IDs
+        // Include country-only POIs in the sample list via COALESCE(country)
         const countryIds = top.map(d => d.countryId);
         const { rows: allPoiRows } = await connection.query(
           `
@@ -372,11 +427,14 @@ const destinations_features = async function (req, res) {
               p.name       AS "name",
               p.primarycategory AS "category",
               p.cityid     AS "cityId",
-              c.countryid  AS "countryId",
-              ROW_NUMBER() OVER (PARTITION BY c.countryid ORDER BY p.poiid) AS rn
+              COALESCE(p.countryid, c.countryid) AS "countryId",
+              ROW_NUMBER() OVER (
+                PARTITION BY COALESCE(p.countryid, c.countryid)
+                ORDER BY p.poiid
+              ) AS rn
             FROM pois p
-            JOIN cities c ON c.cityid = p.cityid
-            WHERE c.countryid = ANY($1)
+            LEFT JOIN cities c ON c.cityid = p.cityid
+            WHERE COALESCE(p.countryid, c.countryid) = ANY($1)
           ) sub
           WHERE rn <= 5
           ORDER BY "countryId", rn
@@ -384,12 +442,9 @@ const destinations_features = async function (req, res) {
           [countryIds]
         );
 
-        // Group POIs by countryId
         const poiMap = new Map();
         for (const poi of allPoiRows) {
-          if (!poiMap.has(poi.countryId)) {
-            poiMap.set(poi.countryId, []);
-          }
+          if (!poiMap.has(poi.countryId)) poiMap.set(poi.countryId, []);
           poiMap.get(poi.countryId).push({
             poiId: poi.poiId,
             name: poi.name,
@@ -398,7 +453,6 @@ const destinations_features = async function (req, res) {
           });
         }
 
-        // Assign to destinations
         for (const dest of top) {
           dest.sampleAttractions = poiMap.get(dest.countryId) || [];
         }
@@ -498,9 +552,6 @@ const destinations_random = async function (req, res) {
   }
 };
 
-/**
- * Helper: normalize weights for /destinations/features
- */
 function normalizeWeights(raw) {
   const defaults = { food: 0.33, attractions: 0.33, hotels: 0.34 };
   const merged = {

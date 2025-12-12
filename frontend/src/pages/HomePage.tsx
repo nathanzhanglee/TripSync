@@ -1,12 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MapPin, Sparkles, Thermometer, Utensils, ArrowRight, Loader2, Calendar, Star, TrendingUp, Globe } from 'lucide-react';
+import {
+  MapPin,
+  Sparkles,
+  Thermometer,
+  ArrowRight,
+  Loader2,
+  Star,
+  TrendingUp,
+  Globe,
+} from 'lucide-react';
+
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
-import { 
-  getRandomDestination, 
-  getRecommendationsCitiesTopAttractions, 
+
+import {
+  getRandomDestination,
+  getRecommendationsCitiesTopAttractions,
   getRecommendationsCitiesWarmBudget,
   getRecommendationsCitiesBalanced,
   getRecommendationsCitiesBestPerCountry,
@@ -14,13 +25,13 @@ import {
   type RecommendationCity,
   type WarmBudgetCity,
   type BalancedCity,
-  type BestPerCountryCity
+  type BestPerCountryCity,
 } from '../services/api';
 
 export function HomePage() {
   const navigate = useNavigate();
+
   const [randomDest, setRandomDest] = useState<RandomDestination | null>(() => {
-    // Try to load from sessionStorage on initial mount
     const saved = sessionStorage.getItem('surpriseDestination');
     if (saved) {
       try {
@@ -31,8 +42,8 @@ export function HomePage() {
     }
     return null;
   });
+
   const [topAttractions, setTopAttractions] = useState<RecommendationCity[]>(() => {
-    // Try to load from sessionStorage on initial mount
     const saved = sessionStorage.getItem('topAttractions');
     if (saved) {
       try {
@@ -43,8 +54,8 @@ export function HomePage() {
     }
     return [];
   });
+
   const [warmBudget, setWarmBudget] = useState<WarmBudgetCity[]>(() => {
-    // Try to load from sessionStorage on initial mount
     const saved = sessionStorage.getItem('warmBudget');
     if (saved) {
       try {
@@ -55,6 +66,7 @@ export function HomePage() {
     }
     return [];
   });
+
   const [balanced, setBalanced] = useState<BalancedCity[]>(() => {
     const saved = sessionStorage.getItem('balanced');
     if (saved) {
@@ -66,6 +78,7 @@ export function HomePage() {
     }
     return [];
   });
+
   const [bestPerCountry, setBestPerCountry] = useState<BestPerCountryCity[]>(() => {
     const saved = sessionStorage.getItem('bestPerCountry');
     if (saved) {
@@ -77,40 +90,39 @@ export function HomePage() {
     }
     return [];
   });
-  const [loading, setLoading] = useState({ 
-    random: !randomDest, 
-    topAttractions: topAttractions.length === 0, 
+
+  const [loading, setLoading] = useState({
+    random: !randomDest,
+    topAttractions: topAttractions.length === 0,
     warmBudget: warmBudget.length === 0,
     balanced: balanced.length === 0,
-    bestPerCountry: bestPerCountry.length === 0
+    bestPerCountry: bestPerCountry.length === 0,
   });
 
   useEffect(() => {
     const loadData = async () => {
-      // Only load random destination if we don't have one saved
+      // Random destination
       if (randomDest === null) {
         try {
-          // Load random destination
           const random = await getRandomDestination('city');
           setRandomDest(random);
-          // Save to sessionStorage so it persists across navigation
           sessionStorage.setItem('surpriseDestination', JSON.stringify(random));
         } catch (error) {
           console.error('Error loading random destination:', error);
         } finally {
-          setLoading(prev => ({ ...prev, random: false }));
+          setLoading((prev) => ({ ...prev, random: false }));
         }
       } else {
-        setLoading(prev => ({ ...prev, random: false }));
+        setLoading((prev) => ({ ...prev, random: false }));
       }
 
-      // Check if we have cached data
+      // Cached checks
       const cachedTop = sessionStorage.getItem('topAttractions');
       const cachedWarm = sessionStorage.getItem('warmBudget');
       const cachedBalanced = sessionStorage.getItem('balanced');
       const cachedBestPerCountry = sessionStorage.getItem('bestPerCountry');
 
-      // Only load top attractions if we don't have them cached
+      // Top attractions
       if (!cachedTop) {
         try {
           const top = await getRecommendationsCitiesTopAttractions(6);
@@ -119,13 +131,13 @@ export function HomePage() {
         } catch (error) {
           console.error('Error loading top attractions:', error);
         } finally {
-          setLoading(prev => ({ ...prev, topAttractions: false }));
+          setLoading((prev) => ({ ...prev, topAttractions: false }));
         }
       } else {
-        setLoading(prev => ({ ...prev, topAttractions: false }));
+        setLoading((prev) => ({ ...prev, topAttractions: false }));
       }
 
-      // Only load warm budget cities if we don't have them cached
+      // Warm budget
       if (!cachedWarm) {
         try {
           const warm = await getRecommendationsCitiesWarmBudget({ limit: 6, minTemp: 18 });
@@ -134,13 +146,13 @@ export function HomePage() {
         } catch (error) {
           console.error('Error loading warm budget cities:', error);
         } finally {
-          setLoading(prev => ({ ...prev, warmBudget: false }));
+          setLoading((prev) => ({ ...prev, warmBudget: false }));
         }
       } else {
-        setLoading(prev => ({ ...prev, warmBudget: false }));
+        setLoading((prev) => ({ ...prev, warmBudget: false }));
       }
 
-      // Only load balanced cities if we don't have them cached
+      // Balanced
       if (!cachedBalanced) {
         try {
           const balancedData = await getRecommendationsCitiesBalanced(6);
@@ -149,45 +161,50 @@ export function HomePage() {
         } catch (error) {
           console.error('Error loading balanced cities:', error);
         } finally {
-          setLoading(prev => ({ ...prev, balanced: false }));
+          setLoading((prev) => ({ ...prev, balanced: false }));
         }
       } else {
-        setLoading(prev => ({ ...prev, balanced: false }));
+        setLoading((prev) => ({ ...prev, balanced: false }));
       }
 
-      // Only load best per country if we don't have them cached
+      // Best per country
       if (!cachedBestPerCountry) {
         try {
-          const bestData = await getRecommendationsCitiesBestPerCountry({ minPoi: 5, minHotels: 5 });
-          // Only keep the first city (one country)
-          const firstCity = bestData.bestCities.length > 0 ? [bestData.bestCities[0]] : [];
-          setBestPerCountry(firstCity);
-          sessionStorage.setItem('bestPerCountry', JSON.stringify(firstCity));
+          const bestData = await getRecommendationsCitiesBestPerCountry({
+            minPoi: 5,
+            minHotels: 5,
+          });
+
+          const rows = Array.isArray(bestData.bestCities) ? bestData.bestCities : [];
+          setBestPerCountry(rows);
+          sessionStorage.setItem('bestPerCountry', JSON.stringify(rows));
+
+          console.log('best-per-country returned:', rows.length, rows.slice(0, 3));
         } catch (error) {
           console.error('Error loading best per country cities:', error);
         } finally {
-          setLoading(prev => ({ ...prev, bestPerCountry: false }));
+          setLoading((prev) => ({ ...prev, bestPerCountry: false }));
         }
       } else {
-        setLoading(prev => ({ ...prev, bestPerCountry: false }));
+        setLoading((prev) => ({ ...prev, bestPerCountry: false }));
       }
     };
 
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [randomDest]);
 
   const handleSurpriseMe = async () => {
     try {
-      setLoading(prev => ({ ...prev, random: true }));
+      setLoading((prev) => ({ ...prev, random: true }));
       const random = await getRandomDestination('city');
       setRandomDest(random);
-      // Update sessionStorage with new random destination
       sessionStorage.setItem('surpriseDestination', JSON.stringify(random));
     } catch (error) {
       console.error('Error getting random destination:', error);
       alert('Failed to get random destination. Please try again.');
     } finally {
-      setLoading(prev => ({ ...prev, random: false }));
+      setLoading((prev) => ({ ...prev, random: false }));
     }
   };
 
@@ -201,19 +218,15 @@ export function HomePage() {
             <h1 className="text-5xl font-bold text-indigo-900">TripSync</h1>
           </div>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto mb-12">
-            Discover the perfect vacation destination for your entire friend group. 
-            Find cities that match your collective interests, plan your itinerary, and explore the world together.
+            Discover the perfect vacation destination for your entire friend group. Find cities that match your
+            collective interests, plan your itinerary, and explore the world together.
           </p>
           <div className="flex gap-4 justify-center">
-            <Button 
-              onClick={() => navigate('/discover')}
-              size="lg"
-              className="bg-indigo-600 hover:bg-indigo-700"
-            >
+            <Button onClick={() => navigate('/discover')} size="lg" className="bg-indigo-600 hover:bg-indigo-700">
               Discover Destinations
               <ArrowRight className="size-4 ml-2" />
             </Button>
-            <Button 
+            <Button
               onClick={() => navigate('/plan')}
               size="lg"
               variant="outline"
@@ -237,10 +250,7 @@ export function HomePage() {
                 <CardDescription>Discover a random destination from our database</CardDescription>
               </div>
               {!loading.random && (
-                <Button
-                  onClick={handleSurpriseMe}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                >
+                <Button onClick={handleSurpriseMe} className="bg-indigo-600 hover:bg-indigo-700 text-white">
                   <Sparkles className="size-4 mr-2" />
                   Surprise Me
                 </Button>
@@ -259,7 +269,9 @@ export function HomePage() {
                 className="flex items-center justify-between p-4 rounded-lg border border-indigo-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all group"
               >
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-lg font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">{randomDest.cityName}</h4>
+                  <h4 className="text-lg font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">
+                    {randomDest.cityName}
+                  </h4>
                   <p className="text-sm text-gray-500 truncate">{randomDest.countryName}</p>
                 </div>
               </Link>
@@ -271,9 +283,9 @@ export function HomePage() {
           </CardContent>
         </Card>
 
-        {/* Recommendations Grid - 2x2 Layout */}
+        {/* Recommendations Grid */}
         <div className="grid md:grid-cols-2 gap-6 mt-8 mb-8">
-          {/* Top Attractions Section */}
+          {/* Top Attractions */}
           <Card className="bg-white/80 backdrop-blur shadow-xl border-indigo-100">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -288,7 +300,7 @@ export function HomePage() {
                   <Loader2 className="size-6 animate-spin mx-auto text-indigo-600" />
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="flex flex-col gap-3">
                   {topAttractions.map((city) => (
                     <Link
                       key={city.cityId}
@@ -296,7 +308,9 @@ export function HomePage() {
                       className="flex items-center justify-between p-3 rounded-lg border border-indigo-200 hover:border-indigo-300 hover:bg-indigo-50 transition-all group"
                     >
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">{city.name}</h4>
+                        <h4 className="font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">
+                          {city.name}
+                        </h4>
                         <p className="text-sm text-gray-500 truncate">{city.countryName}</p>
                       </div>
                       <Badge variant="secondary" className="ml-3 shrink-0 bg-indigo-100 text-indigo-700">
@@ -309,7 +323,7 @@ export function HomePage() {
             </CardContent>
           </Card>
 
-          {/* Warm & Budget-Friendly Section */}
+          {/* Warm & Budget */}
           <Card className="bg-white/80 backdrop-blur shadow-xl border-indigo-100">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -324,7 +338,7 @@ export function HomePage() {
                   <Loader2 className="size-6 animate-spin mx-auto text-indigo-600" />
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="flex flex-col gap-3">
                   {warmBudget.map((city) => (
                     <Link
                       key={city.cityId}
@@ -332,7 +346,9 @@ export function HomePage() {
                       className="flex items-center justify-between p-3 rounded-lg border border-orange-200 hover:border-orange-300 hover:bg-orange-50 transition-all group"
                     >
                       <div className="flex-1 min-w-0">
-                        <h4 className="font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">{city.name}</h4>
+                        <h4 className="font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">
+                          {city.name}
+                        </h4>
                         <p className="text-sm text-gray-500 truncate">{city.countryName}</p>
                       </div>
                       <div className="flex gap-2 ml-3 shrink-0">
@@ -349,17 +365,17 @@ export function HomePage() {
               )}
             </CardContent>
           </Card>
-
         </div>
 
-        {/* Best Per Country Section - Full Width */}
+        {/* Best Per Country */}
+        <div className="h-8" />
         <Card className="bg-white/80 backdrop-blur shadow-xl border-indigo-100 mt-8 mb-8">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Globe className="size-5 text-blue-600" />
               Best City Per Country
             </CardTitle>
-            <CardDescription>Top-rated city with museums and quality hotels</CardDescription>
+            <CardDescription>Top-rated city with stores and quality hotels</CardDescription>
           </CardHeader>
           <CardContent>
             {loading.bestPerCountry ? (
@@ -367,34 +383,101 @@ export function HomePage() {
                 <Loader2 className="size-6 animate-spin mx-auto text-indigo-600" />
               </div>
             ) : bestPerCountry.length > 0 ? (
-              <Link
-                to={`/city/${bestPerCountry[0].cityId}`}
-                className="flex items-center justify-between p-4 rounded-lg border-2 border-blue-200 hover:border-blue-300 hover:bg-blue-50 transition-all group"
-              >
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-lg font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">{bestPerCountry[0].cityName}</h4>
-                  <p className="text-sm text-gray-500 truncate">{bestPerCountry[0].countryName}</p>
+              <div className="flex flex-col gap-3">
+                <div className="text-xs text-gray-500">
+                  Showing {bestPerCountry.length} result{bestPerCountry.length === 1 ? '' : 's'}
                 </div>
-                <div className="flex items-center gap-4 ml-4 shrink-0">
-                  <div className="text-right">
-                    <p className="text-sm text-gray-600">Hotel Rating</p>
-                    <p className="text-lg font-semibold text-blue-700">
-                      {bestPerCountry[0].avgHotelRating != null ? Number(bestPerCountry[0].avgHotelRating).toFixed(1) : 'N/A'}★
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-gray-600">Attractions</p>
-                    <p className="text-lg font-semibold text-blue-700">{bestPerCountry[0].poiCount}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-gray-600">Hotels</p>
-                    <p className="text-lg font-semibold text-blue-700">{bestPerCountry[0].hotelCount}</p>
-                  </div>
-                </div>
-              </Link>
+
+                {bestPerCountry.map((row) => (
+                  <Link
+                    key={`${row.countryId}-${row.cityId}`}
+                    to={`/city/${row.cityId}`}
+                    className="flex items-center justify-between p-4 rounded-lg border-2 border-blue-200 hover:border-blue-300 hover:bg-blue-50 transition-all group"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-lg font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">
+                        {row.cityName}
+                      </h4>
+                      <p className="text-sm text-gray-500 truncate">{row.countryName}</p>
+                      {row.rankInCountry != null && (
+                        <p className="text-xs text-gray-400">Rank in country: {row.rankInCountry}</p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-4 ml-4 shrink-0">
+                      <div className="text-right">
+                        <p className="text-sm text-gray-600">Hotel Rating</p>
+                        <p className="text-lg font-semibold text-blue-700">
+                          {row.avgHotelRating != null ? Number(row.avgHotelRating).toFixed(1) : 'N/A'}★
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-gray-600">Attractions</p>
+                        <p className="text-lg font-semibold text-blue-700">{row.poiCount}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-gray-600">Hotels</p>
+                        <p className="text-lg font-semibold text-blue-700">{row.hotelCount}</p>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
             ) : (
               <div className="text-center py-8">
                 <p className="text-gray-500">No cities found</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Balanced */}
+        <div className="h-8" />
+        <Card className="bg-white/80 backdrop-blur shadow-xl border-indigo-100">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="size-5 text-emerald-600" />
+              Balanced Picks
+            </CardTitle>
+            <CardDescription>A mix of affordability, attractions, and hotel quality</CardDescription>
+          </CardHeader>
+
+          <CardContent>
+            {loading.balanced ? (
+              <div className="text-center py-8">
+                <Loader2 className="size-6 animate-spin mx-auto text-indigo-600" />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {balanced.map((city) => (
+                  <Link
+                    key={city.cityId}
+                    to={`/city/${city.cityId}`}
+                    className="flex items-center justify-between p-3 rounded-lg border border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition-all group"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-indigo-900 group-hover:text-indigo-700 truncate">
+                        {city.cityName}
+                      </h4>
+                      <p className="text-sm text-gray-500 truncate">{city.countryName}</p>
+                    </div>
+
+                    <div className="flex gap-2 ml-3 shrink-0">
+                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 text-xs">
+                        Score {city.compositeScore != null ? Number(city.compositeScore).toFixed(2) : 'N/A'}
+                      </Badge>
+                      <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs">
+                        ${city.avgFoodPrice != null ? Number(city.avgFoodPrice).toFixed(1) : 'N/A'}
+                      </Badge>
+                      <Badge variant="secondary" className="bg-indigo-100 text-indigo-700 text-xs">
+                        {city.attractionCount ?? 0} POIs
+                      </Badge>
+                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 text-xs">
+                        {city.avgHotelRating != null ? Number(city.avgHotelRating).toFixed(1) : 'N/A'}★
+                      </Badge>
+                    </div>
+                  </Link>
+                ))}
               </div>
             )}
           </CardContent>
@@ -403,4 +486,3 @@ export function HomePage() {
     </div>
   );
 }
-

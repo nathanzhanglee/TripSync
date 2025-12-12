@@ -187,35 +187,70 @@ describe("get_recommendations_cities_best_per_country", () => {
   it("uses defaults when params invalid", async () => {
     connection.query.mockResolvedValueOnce({ rows: [] });
 
-    const req = { query: { minPoi: "bad", minHotels: "-1" } };
+    const req = { query: { minPoi: "bad", minHotels: "-1", mode: "nope" } };
     const res = createMockRes();
 
     await get_recommendations_cities_best_per_country(req, res);
 
     const [, params] = connection.query.mock.calls[0];
-    expect(params[0]).toBe(5); // default minPoi
-    expect(params[1]).toBe(5); // default minHotels
+    expect(params[0]).toBe(1); // default minPoi
+    expect(params[1]).toBe(1); // default minHotels
+    expect(params[2]).toBe(1); // default topKPerCountry (perCountry mode)
 
     expect(res.json).toHaveBeenCalledWith({
       bestCities: [],
-      minPoi: 5,
-      minHotels: 5
+      minPoi: 1,
+      minHotels: 1,
+      mode: "perCountry",
+      limit: undefined,
+      topKPerCountry: 1,
+      returned: 0
     });
   });
 
-  it("uses provided minPoi and minHotels", async () => {
-    const rows = [{ countryId: 1, cityId: 10 }];
+  it("perCountry: uses provided minPoi/minHotels/topKPerCountry", async () => {
+    const rows = [{ countryId: 1, cityId: 10, rankInCountry: 1 }];
     connection.query.mockResolvedValueOnce({ rows });
 
-    const req = { query: { minPoi: "7", minHotels: "9" } };
+    const req = { query: { minPoi: "7", minHotels: "9", mode: "perCountry", topKPerCountry: "3" } };
     const res = createMockRes();
 
     await get_recommendations_cities_best_per_country(req, res);
 
+    const [, params] = connection.query.mock.calls[0];
+    expect(params).toEqual([7, 9, 3]);
+
     expect(res.json).toHaveBeenCalledWith({
       bestCities: rows,
       minPoi: 7,
-      minHotels: 9
+      minHotels: 9,
+      mode: "perCountry",
+      limit: undefined,
+      topKPerCountry: 3,
+      returned: rows.length
+    });
+  });
+
+  it("global: uses limit as the third param and returns limit in payload", async () => {
+    const rows = [{ countryId: 1, cityId: 10 }];
+    connection.query.mockResolvedValueOnce({ rows });
+
+    const req = { query: { mode: "global", limit: "5", minPoi: "2", minHotels: "3" } };
+    const res = createMockRes();
+
+    await get_recommendations_cities_best_per_country(req, res);
+
+    const [, params] = connection.query.mock.calls[0];
+    expect(params).toEqual([2, 3, 5]);
+
+    expect(res.json).toHaveBeenCalledWith({
+      bestCities: rows,
+      minPoi: 2,
+      minHotels: 3,
+      mode: "global",
+      limit: 5,
+      topKPerCountry: undefined,
+      returned: rows.length
     });
   });
 
@@ -231,8 +266,8 @@ describe("get_recommendations_cities_best_per_country", () => {
     expect(res.json).toHaveBeenCalledWith({
       error: "Database query failed",
       bestCities: [],
-      minPoi: 5,
-      minHotels: 5
+      minPoi: 1,
+      minHotels: 1
     });
   });
 });

@@ -349,8 +349,8 @@ describe("destinations_features (scope=country)", () => {
   });
 
   it("aggregates by country and returns sampleAttractions", async () => {
-    // 1st query: city rows for multiple cities in same country
     connection.query
+      // 1) main query: city rows
       .mockResolvedValueOnce({
         rows: [
           {
@@ -379,7 +379,11 @@ describe("destinations_features (scope=country)", () => {
           }
         ]
       })
-      // 2nd query: POIs aggregated per country
+      // 2) country-only hotels query
+      .mockResolvedValueOnce({ rows: [] })
+      // 3) country-only POIs query
+      .mockResolvedValueOnce({ rows: [] })
+      // 4) sample attractions per country
       .mockResolvedValueOnce({
         rows: [
           {
@@ -404,11 +408,11 @@ describe("destinations_features (scope=country)", () => {
 
     const { destinations } = res.json.mock.calls[0][0];
     expect(destinations.length).toBe(1);
+
     const d = destinations[0];
     expect(d.scope).toBe("country");
     expect(d.countryId).toBe(10);
-    expect(d.avgTemperature).toBeGreaterThan(0);
-    expect(d.hotelCount).toBe(5); // 2 + 3
+    expect(d.hotelCount).toBe(5);
     expect(Array.isArray(d.sampleAttractions)).toBe(true);
   });
 

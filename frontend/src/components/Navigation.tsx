@@ -8,7 +8,7 @@ export function Navigation() {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <nav className="bg-white/80 backdrop-blur border-b border-indigo-100 sticky top-0 z-50">
+    <nav className="bg-white/80 backdrop-blur border-b border-indigo-100 sticky top-0 z-50 py-2">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
           <Link to="/" className="flex items-center gap-2 text-indigo-600 hover:text-indigo-700">

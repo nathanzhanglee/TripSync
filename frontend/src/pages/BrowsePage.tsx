@@ -101,21 +101,28 @@ export function BrowsePage() {
               setCountriesPage(1);
               setCitiesPage(1);
             }}>
-              <TabsList className="mb-6">
-                <TabsTrigger value="countries">
+              <TabsList className="mb-6 inline-flex h-auto w-full justify-start gap-3 rounded-none bg-transparent p-0">
+                <TabsTrigger
+                  value="countries"
+                  className="inline-flex items-center justify-center rounded-full border border-indigo-100 bg-white/70 px-4 py-2 shadow-sm transition-all hover:bg-white hover:shadow-md data-[state=active]:border-indigo-600 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-md"
+                >
                   <Globe className="size-4 mr-2" />
                   Countries
                 </TabsTrigger>
-                <TabsTrigger value="cities">
+
+                <TabsTrigger
+                  value="cities"
+                  className="inline-flex items-center justify-center rounded-full border border-indigo-100 bg-white/70 px-4 py-2 shadow-sm transition-all hover:bg-white hover:shadow-md data-[state=active]:border-indigo-600 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:shadow-md"
+                >
                   <MapPin className="size-4 mr-2" />
                   Cities
                 </TabsTrigger>
               </TabsList>
 
               <TabsContent value="countries">
-                <div className="flex gap-4 mb-6">
-                  <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 size-4" />
+                <div className="mb-6">
+                  <div className="flex h-10 w-full items-center gap-2 rounded-md border border-indigo-100 bg-white/70 px-3 shadow-sm focus-within:ring-2 focus-within:ring-indigo-200">
+                    <Search className="size-4 shrink-0 text-gray-400" />
                     <Input
                       placeholder="Search countries..."
                       value={search}
@@ -123,7 +130,7 @@ export function BrowsePage() {
                         setSearch(e.target.value);
                         setCountriesPage(1);
                       }}
-                      className="pl-10"
+                      className="flex-1 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                     />
                   </div>
                 </div>
@@ -203,9 +210,9 @@ export function BrowsePage() {
               </TabsContent>
 
               <TabsContent value="cities">
-                <div className="flex gap-4 mb-6">
-                  <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 size-4" />
+                <div className="mb-6">
+                  <div className="flex h-10 w-full items-center gap-2 rounded-md border border-indigo-100 bg-white/70 px-3 shadow-sm focus-within:ring-2 focus-within:ring-indigo-200">
+                    <Search className="size-4 shrink-0 text-gray-400" />
                     <Input
                       placeholder="Search cities..."
                       value={search}
@@ -213,7 +220,7 @@ export function BrowsePage() {
                         setSearch(e.target.value);
                         setCitiesPage(1);
                       }}
-                      className="pl-10"
+                      className="flex-1 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                     />
                   </div>
                 </div>

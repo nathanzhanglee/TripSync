@@ -146,7 +146,7 @@ describe("post_planning_itineraries level=city", () => {
 
     // Check the params of the POI query
     const [, poiParams] = connection.query.mock.calls[1];
-    expect(poiParams).toEqual([1, ["zoo"]]);
+    expect(poiParams).toEqual([1, ["zoo"], 10]);
 
     const { itinerary, summary } = res.json.mock.calls[0][0];
     expect(itinerary.length).toBe(2);
@@ -184,8 +184,11 @@ describe("post_planning_itineraries level=country", () => {
     connection.query.mockReset();
   });
 
-  it("returns 404 when no cities with POIs are found", async () => {
-    connection.query.mockResolvedValueOnce({ rows: [] }); // citiesSql
+  it("returns 404 when no POIs exist in this country (neither city-level nor country-level)", async () => {
+    // 1) country-only POIs pool
+    connection.query.mockResolvedValueOnce({ rows: [] });
+    // 2) cities with city-level POIs
+    connection.query.mockResolvedValueOnce({ rows: [] });
 
     const req = {
       body: { level: "country", countryId: 10, numDays: 3 }
@@ -196,13 +199,14 @@ describe("post_planning_itineraries level=country", () => {
 
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.json).toHaveBeenCalledWith({
-      error: "No cities with POIs found in this country."
+      error: "No POIs found in this country (neither city-level nor country-level)."
     });
   });
 
   it("builds a multi-city itinerary with maxCities and avoidCategories", async () => {
     // 1st query: cities in country
     connection.query
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
         rows: [
           {
@@ -270,6 +274,39 @@ describe("post_planning_itineraries level=country", () => {
     expect(summary.totalDays).toBe(3);
     expect(summary.totalCities).toBeGreaterThanOrEqual(1);
     expect(summary.totalPois).toBeGreaterThan(0);
+  });
+
+  it("builds a country-only itinerary when no city-level POIs exist but country-only POIs do", async () => {
+    // 1) countryOnlyPoisSql returns POIs
+    connection.query
+      .mockResolvedValueOnce({
+        rows: [
+          { poiid: 1, name: "Country POI 1", cityid: null, address: "A", primarycategory: "museum" },
+          { poiid: 2, name: "Country POI 2", cityid: null, address: "B", primarycategory: "park" }
+        ]
+      })
+      // 2) citiesSql returns no cities with POIs
+      .mockResolvedValueOnce({ rows: [] });
+
+    const req = {
+      body: {
+        level: "country",
+        countryId: 10,
+        numDays: 2,
+        poisPerDay: 1,
+        preferredCategoriesByDay: [["museum"], ["park"]],
+        avoidCategories: []
+      }
+    };
+    const res = createMockRes();
+
+    await post_planning_itineraries(req, res);
+
+    const payload = res.json.mock.calls[0][0];
+    expect(payload.itinerary).toHaveLength(2);
+    expect(payload.itinerary[0].cityId).toBeNull();
+    expect(payload.itinerary[0].pois).toHaveLength(1);
+    expect(payload.summary.totalCities).toBe(0); // no cities used
   });
 
   it("returns 500 on DB error", async () => {
