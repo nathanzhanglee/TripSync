@@ -258,7 +258,6 @@ export function PlanningPage() {
                           <div className="flex-1 min-w-0">
                             <h4 className="font-semibold text-indigo-900">{poi.name}</h4>
                             <div className="flex items-center gap-2 mt-1">
-                              <Badge variant="secondary" className="bg-indigo-100 text-indigo-700">{poi.category}</Badge>
                               <span className="text-sm text-gray-600">{poi.cityName}</span>
                             </div>
                           </div>
